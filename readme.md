@@ -13,8 +13,8 @@ Model Precision: Enhanced by 15% using data visualization tools, ensuring accura
 
 Technologies Used
 - Programming Languages**: Python
-- Libraries**: Pandas, NumPy, Matplotlib, Seaborn, Scikit-Learn
-- Techniques**: Linear Regression, Principal Component Analysis (PCA), Time Series Analysis
+- Libraries: Pandas, NumPy, Matplotlib, Seaborn, Scikit-Learn
+- Techniques: Linear Regression, Principal Component Analysis (PCA), Time Series Analysis
 - Tools: Jupyter Notebook
 
 
