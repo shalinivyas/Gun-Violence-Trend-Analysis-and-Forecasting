@@ -1,0 +1,391 @@
+---
+title: "Gun Violence: Data Visualization and Time Series Analysis"
+output: html_notebook
+Author : "Nikki Sharma"
+---
+
+#Loading libraries required and reading the data into R
+```{r, message=FALSE, warning=FALSE}
+library(knitr)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(tibble)
+library(stringr)
+library(gridExtra)
+library(scales)
+library(lubridate)
+library(ggrepel)
+library(leaflet)
+library(rgdal)
+```
+
+#Reading the data 
+```{r}
+gun <- read.csv("C:/Users/13055/Downloads/GunViolenceMiami.csv")
+```
+
+```{r, results='hide', warning=FALSE}
+gun <- as.tibble(data.table::fread(str_c("C:/Users/13055/Downloads/GunViolenceMiami.csv"),                                   header=TRUE,stringsAsFactors = FALSE, na.strings=c("NA", "")))
+```
+
+```{r}
+glimpse(gun)
+```
+
+#Reformatting the Date variable
+```{r}
+gun$date <- mdy(gun$date)
+str(gun$date)
+
+```
+```{r}
+summary(gun$date)
+```
+
+# Incidents reported based on year 
+
+```{r}
+gun$year <- year(gun$date) #(Where 2013 data were recorded for july, oct & dec and 2018 was uptil May)
+
+gun %>%
+        ggplot(aes(x=as.factor(year))) + geom_bar(stat='count', fill=rainbow(6)) +
+        scale_y_continuous(labels=comma) +
+        geom_label(stat = "count", aes(label = ..count.., y = ..count..))
+```
+#Incidents calculated on quaterly basis and for Q1 for each year 
+
+```{r}
+gun$quarter <- quarter(gun$date) #extract Quarters from date
+
+q1 <- gun %>% filter(year!=2013) %>% select(year, quarter) %>% group_by(year) %>% count(quarter) %>%
+        ggplot(aes(x=as.factor(quarter), y=n)) + geom_bar(stat='identity', fill= heat.colors(17)) +
+        scale_y_continuous(labels=comma) + facet_grid(.~year) + labs(x='Quarter', y='Number of incidents')
+
+q2 <- gun %>% filter(year!=2013 & quarter==1) %>% select(year, quarter) %>%
+        group_by(year) %>% count(quarter) %>%
+        ggplot(aes(x=as.factor(year), y=n)) + geom_bar(stat='identity', fill=heat.colors(5)) +
+        scale_y_continuous(labels=comma) + labs(x='Incidents in Q1 of each year', y='Number of incidents')
+
+grid.arrange(q1, q2)
+```
+#Incidents captured by month
+
+```{r, warning=FALSE, message=FALSE}
+gun$month <- month(gun$date, label=TRUE)
+
+#only taking the complete years 2014-2017
+plotly::ggplotly(gun %>% filter(year!=c(2013, 2018)) %>% count(month) %>%
+        ggplot(aes(x=month, y=n)) + geom_bar(stat='identity', fill=topo.colors(12)) + 
+        scale_y_continuous(labels=comma) +
+        labs(x='Month', y='Number of incidents', title='Incidents by Month'))
+```
+
+#Incidents report calculated by Weekday
+
+```{r}
+gun$weekday <- wday(gun$date, label=TRUE)
+
+gun %>% count(weekday) %>%
+        ggplot(aes(x=weekday, y=n)) + geom_bar(stat='identity', fill=cm.colors(7)) +
+        scale_y_continuous(labels=comma) +
+        labs(x='Weekday', y='Number of incidents', title='Incidents by Weekday')
+```
+# Dates with most incidents being reported
+
+```{r, message=FALSE}
+gun$day <- day(gun$date)
+gun <- gun %>% mutate(date2=paste(month, day))
+kable(gun %>% filter(year!=c(2013, 2018)) %>% count(date2) %>% top_n(10) %>% arrange(desc(n)) %>% rename(Date=date2, "Total number of incidents"=n))
+```
+
+
+#Comparing number of incidents and victims by location
+
+
+```{r}
+gun[, c('city_or_county')] <- lapply(gun[, c('city_or_county')], as.factor) 
+str(gun$city_or_county)
+```
+#Numbers of incidents reported diff day by city_County
+```{r}
+incidentsByCity <- gun %>% select(city_or_county, state) %>% rename(city=city_or_county) %>% group_by(city, state) %>% summarize(cityIncidents=n())
+```
+
+
+```{r, message=FALSE, out.width="100%", fig.height=8}
+plotly::ggplotly(gun %>% count(city_or_county) %>%
+        ggplot(aes(x=reorder(city_or_county, n), y=n, fill=n, text=city_or_county)) +
+        geom_bar(stat='identity', fill='red') + coord_flip() +  
+        labs(x='', y='Number of incidents' , title='Incidents by city'),
+        tooltip=c("text", "y"))
+```
+
+
+
+#Severity of Incidents by city
+
+```{r}
+#creating a new variable that adds up the number of killed and injured people for each incident.
+gun$victims = gun$n_killed + gun$n_injured
+```
+
+```{r}
+VictimsByCity <- gun %>% group_by(city_or_county) %>% summarize(sumVic=sum(victims), sumInj=sum(n_injured), sumDeath=sum(n_killed), PercDeath=round(sumDeath/sumVic,2), sumIncidents=n(), vicPerInc=round(sumVic/sumIncidents,2))
+head(VictimsByCity)
+```
+#Victims per Incidents by city reported in miami dade county
+#Victims per incidents by death rate
+```{r}
+VictimsByCity %>% filter(sumDeath>1) %>% #sum of deaths 
+        ggplot(aes(x=reorder(city_or_county, -vicPerInc), y=vicPerInc)) + geom_bar(stat='identity',
+                                                                                   fill= topo.colors(18)) +
+        labs(x='City', y='Victims per incidents',title = 'Death rate of Victims by City') +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+#Victims per Incidents 
+```{r}
+
+VictimsByCity %>% filter(vicPerInc > 0.9) %>%
+      ggplot(aes(x=reorder(city_or_county, -vicPerInc), y=vicPerInc)) + geom_bar(stat='identity', fill=topo.colors(22)) +
+        labs(x='City', y='Victims per incidents', title = 'Victims per Incident by City') + 
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+
+```
+
+# Calculate total Victims (killed + injured) by City & Incidents with highest numbers of victims
+
+```{r}
+#creating a new variable that adds up the number of killed and injured people for each incident.
+gun$victims = gun$n_killed + gun$n_injured
+```
+```{r}
+#count of top 10 incident report of victims by location, date and city 
+Top10 <- gun %>% select(incident_id, date, n_killed, n_injured, victims, location_description, city_or_county, latitude, longitude) %>% rename(Incident_Id=incident_id, Date=date, Killed=n_killed, Injured=n_injured, Victims=victims, Location=location_description, City=city_or_county) %>%
+         arrange(desc(Victims)) %>% top_n(n=13, wt=Victims)
+
+```
+```{r}
+kable(Top10 %>% select(-longitude, -latitude))
+```
+#An interactive map of the incidents with highest numbers of victims by city 
+```{r}
+TopMap <- Top10 %>% select(latitude, longitude, Victims, City, Location)
+
+labels <- paste0("<strong>City: </strong>", TopMap$City, 
+                 "<br><strong>Location: </strong>", TopMap$Location,
+                 "<br><strong>Victims </strong>", TopMap$Victims) %>% lapply(htmltools::HTML)
+
+
+leaflet(TopMap) %>%
+        setView(lng=-96, lat=37.8, zoom=4) %>%
+        addTiles() %>%
+        addProviderTiles("Esri.NatGeoWorldMap") %>%
+        addCircleMarkers(~longitude, ~latitude, color = "red", radius=~sqrt(Victims), label = labels)
+```
+
+#Analyzing the Incident Characteristics
+
+```{r}
+head(gun$incident_characteristics,2)
+```
+
+```{r}
+gun$incident_characteristics <- gsub("\\|\\|", "|", gun$incident_characteristics)
+
+IncCharac <- splitstackshape::cSplit(gun %>% select(incident_id, state, city_or_county, incident_characteristics), 'incident_characteristics', sep =  '|', direction="long")
+
+numCat <- round(nrow(IncCharac)/nrow(gun),1)
+cat('On average, there are', numCat, 'incident categories specified per incident')
+```
+#Below, you can see that the first two incidents are now split  into 8 observations.
+```{r}
+kable(head(IncCharac,8))
+```
+#Incident categories in the city
+```{r}
+IncCharac %>% count(incident_characteristics) %>% top_n(30, wt=n) %>%
+        ggplot(aes(x=reorder(incident_characteristics, n), y=n)) +
+        geom_bar(stat='identity', fill='red') +
+        coord_flip() + labs(x='Incident Category', y='Number of incidents',title = 'Incident Types')
+```
+#As the first 4 categories seem overall categories, I will display numbers on these 4 categories separately
+
+```{r}
+overallCats <- c("Shot - Wounded/Injured", "Shot - Dead (murder, accidental, suicide)", "Non-Shooting Incident", "Shots Fired - No Injuries")
+```
+
+```{r}
+TableOverallCats <- IncCharac %>% filter(incident_characteristics %in% overallCats) %>% count(incident_characteristics)
+cat('For', round((sum(TableOverallCats$n)/nrow(gun))*100), 'percent of incidents, an overall category is specified')
+```
+```{r}
+coloursShot <- c("Shot - Wounded/Injured"="orange", "Shot - Dead (murder, accidental, suicide)"="red", "Non-Shooting Incident"="green", "Shots Fired - No Injuries"="yellow")
+
+#creating a function to vary the x-axis scale (next plot uses same graph with diferent scale)
+usCats <- function(fixedX=0.5)
+        {
+        IncCharac %>% filter(incident_characteristics %in% overallCats) %>%
+        count(incident_characteristics) %>%
+        ggplot(aes(x=reorder(incident_characteristics, n), y=n/sum(n), fill=factor(incident_characteristics))) +
+        geom_bar(stat='identity', width = 0.5) + scale_fill_manual(values = coloursShot) +
+        theme(legend.position="none") + coord_flip(ylim = c(0, 0.5)) + labs(x=" ", y='Miami Dade overall',title =          'Category based on highest reported Incident type') +
+        scale_y_continuous(labels=percent)
+        }
+
+#creating a function to create plots by city
+cityCats <- function(cityName)
+        {
+        IncCharac %>% filter(city==cityName & incident_characteristics %in% overallCats) %>%
+        count(incident_characteristics) %>%
+        ggplot(aes(x=reorder(incident_characteristics, n), y=n/sum(n), fill=factor(incident_characteristics))) +
+        geom_bar(stat='identity', width = 0.5)+ scale_fill_manual(values = coloursShot) +
+        theme(legend.position="none") + coord_flip(ylim = c(0, 0.5)) + labs(x="", y=CityName) +
+        scale_y_continuous(labels=percent)
+}
+
+MiamiOverallCats <- usCats()
+
+
+grid.arrange(MiamiOverallCats, ncol=1)
+```
+#Comparing the main incident categories by city
+```{r}
+#creating a function to create plots by city
+cityCats <- function(cityName){
+   IncCharac %>% filter(city_or_county==cityName & incident_characteristics %in% overallCats) %>%
+   count(incident_characteristics) %>%
+   ggplot(aes(x=reorder(incident_characteristics, n), y=n/sum(n), fill=factor(incident_characteristics))) +
+   geom_bar(stat='identity', width = 0.5) + scale_fill_manual(values = coloursShot) +
+   theme(legend.position="none") + coord_flip(ylim = c(0, 0.5)) + labs(x="", y=cityName) +
+   scale_y_continuous(labels=percent)
+}
+
+#displaying city with highest no of victims 
+#MiamiOverallCats <- usCats(0.8)
+MiamiCats <- cityCats('Miami')
+MiamiGCats <- cityCats('Miami Gardens')
+MiamiBCats <- cityCats('Miami Beach')
+
+grid.arrange(MiamiCats, MiamiGCats,MiamiBCats, ncol= 1)
+```
+#Time Series analysis 
+
+```{r}
+rm(list = ls())
+##load library
+library('xts')
+library("aTSA")
+library("forecast")
+library("fpp")
+```
+
+
+
+```{r}
+raw_data <- read.csv("C:/Users/13055/Downloads/GunViolenceMiami.csv")
+df <- raw_data %>% group_by(date) %>% summarize(count=n())
+df <- df[-1,]
+df$date <- as.character(df$date)
+df$date <- as.Date(df$date,format = "%m/%d/%Y")
+df1 <- as.data.frame(seq(as.Date("2014/1/1"), as.Date("2017/12/31"), by = "day"))
+colnames(df1) <- "date"
+data_final <- left_join(df1,df)
+rm(df,df1)
+data_final$count[is.na(data_final$count)] <- 0
+
+```
+#data aggregation
+```{r}
+data_weekly <- as.xts(data_final$count,order.by=as.Date(data_final$date))
+weekly <- apply.weekly(data_weekly,sum)
+plot(weekly,col = "red", main = "Weekly data")
+Monthly <- apply.monthly(data_weekly,sum)
+plot(Monthly,col ="red", main ="Monthly data")
+Yearly <- apply.yearly(data_weekly,sum)
+plot(Yearly,col ="red", main ="Yearly data")
+quaterly <- apply.quarterly(data_weekly,sum)
+plot(quaterly,col ="red", main ="Quater data")
+
+```
+
+#Data Visualization
+```{r}
+plot(decompose(ts(weekly,frequency = 52)))
+plot(decompose(ts(Monthly,frequency = 12)))
+plot(decompose(ts(quaterly,frequency = 4)))
+#plot(decompose(ts(Yearly,frequency = 2)))
+
+hist(weekly, col = "red")
+hist(Monthly,col = "red")
+hist(quaterly,col = "red")
+
+fivenum(weekly)
+fivenum(Monthly)
+fivenum(quaterly)
+
+```
+
+#Stationery test
+```{r}
+#Dickey Fuller test:
+  
+#Stationary testing and converting a series into a stationary series are the most critical processes in a time series modelling. 
+#To confirm that the series is not stationary, we perform the augmented Dickey-Fuller Test.
+
+
+adf.test(ts(Monthly,frequency = 12))
+
+#P value is 0.01 indicating the null hypothesis 'series is stationary' is true i.e the series is stationary
+
+adf.test(ts(weekly,frequency = 52))
+
+#P value is 0.01 indicating the null hypothesis 'series is stationary' is true i.e the series is stationary
+
+adf.test(ts(quaterly,frequency = 4))
+
+#P value is 0.01 indicating the null hypothesis 'series is stationary' is true i.e the series is stationary
+
+```
+# Auto ARIMA 
+
+```{r}
+weekly_arima <- auto.arima(weekly)
+summary(weekly_arima)
+Monthly_arima <- auto.arima(Monthly)
+summary(Monthly_arima)
+quaterly_arima <- auto.arima(quaterly)
+summary(quaterly_arima)
+yearly_arima <- auto.arima(Yearly)
+summary(yearly_arima)
+```
+
+```{r}
+plot(forecast(weekly_arima,52))
+plot(forecast(Monthly_arima,12))
+plot(forecast(quaterly_arima,4))
+plot(forecast(yearly_arima,1))
+```
+#  Arima With Seasonality
+```{r}
+# Monthly Arima Model
+
+Monthly_Arima_seas <- arima(ts(Monthly,frequency = 12), order =c(0,0,0), seasonal = list(order = c(0,1,0), period = 12))
+#plot(c(ts(Monthly,forecast(Monthly_Arima_seas ,12))),type = 'l')
+plot(forecast(Monthly_Arima_seas ,12))
+plot(residuals(Monthly_Arima_seas))
+#Residuals seems to return to the mean and we don't see any pattern in the residuals.
+
+# Weekly Arima Model
+
+Weekly_Arima_seas <- arima(ts(weekly,frequency = 52), order =c(0,0,0), seasonal = list(order = c(0,1,0), period = 52))
+#plot(c(ts(weekly,forecast(Weekly_Arima_seas ,52))),type = 'l')
+plot(forecast(Weekly_Arima_seas ,52))
+plot(residuals(Weekly_Arima_seas))
+#Residuals seems to return to the mean and we don't see any pattern in the residuals.
+
+```
+
